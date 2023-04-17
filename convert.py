@@ -1,9 +1,12 @@
 import os
 import argparse
+import numpy as np
+from pathlib import Path
 import torch
 import librosa
 import time
 from scipy.io.wavfile import write
+import tempfile
 from tqdm import tqdm
 
 import utils
@@ -13,6 +16,16 @@ from wavlm import WavLM, WavLMConfig
 from speaker_encoder.voice_encoder import SpeakerEncoder
 import logging
 logging.getLogger('numba').setLevel(logging.WARNING)
+
+
+def normalize_source_wav(wav_in: str, sample_rate: int, wav_out: str):
+    wav, sr = librosa.load(wav_in)
+    wav, _ = librosa.effects.trim(wav, top_db=20)
+    peak = np.abs(wav).max()
+    if peak > 1.0:
+        wav = 0.98 * wav / peak
+    wav1 = librosa.resample(wav, orig_sr=sr, target_sr=sample_rate)
+    write(wav_out, sample_rate, (wav1 * np.iinfo(np.int16).max).astype(np.int16))
 
 
 if __name__ == "__main__":
@@ -44,49 +57,54 @@ if __name__ == "__main__":
         smodel = SpeakerEncoder('speaker_encoder/ckpt/pretrained_bak_5805000.pt')
 
     print("Processing text...")
-    titles, srcs, tgts = [], [], []
-    with open(args.txtpath, "r") as f:
-        for rawline in f.readlines():
-            title, src, tgt = rawline.strip().split("|")
-            titles.append(title)
-            srcs.append(src)
-            tgts.append(tgt)
+    with tempfile.TemporaryDirectory() as wk_dir:
+        titles, srcs, tgts = [], [], []
+        with open(args.txtpath, "r") as f:
+            for rawline in f.readlines():
+                title, src, tgt = rawline.strip().split("|")
+                normalized_src = f"{wk_dir}/{title}_src.wav"
+                normalize_source_wav(wav_in=src,
+                                     sample_rate=16000,
+                                     wav_out=normalized_src)
+                titles.append(title)
+                srcs.append(normalized_src)
+                tgts.append(tgt)
 
-    print("Synthesizing...")
-    with torch.no_grad():
-        for line in tqdm(zip(titles, srcs, tgts)):
-            title, src, tgt = line
-            # tgt
-            wav_tgt, _ = librosa.load(tgt, sr=hps.data.sampling_rate)
-            wav_tgt, _ = librosa.effects.trim(wav_tgt, top_db=20)
-            if hps.model.use_spk:
-                g_tgt = smodel.embed_utterance(wav_tgt)
-                g_tgt = torch.from_numpy(g_tgt).unsqueeze(0).cuda()
-            else:
-                wav_tgt = torch.from_numpy(wav_tgt).unsqueeze(0).cuda()
-                mel_tgt = mel_spectrogram_torch(
-                    wav_tgt, 
-                    hps.data.filter_length,
-                    hps.data.n_mel_channels,
-                    hps.data.sampling_rate,
-                    hps.data.hop_length,
-                    hps.data.win_length,
-                    hps.data.mel_fmin,
-                    hps.data.mel_fmax
-                )
-            # src
-            wav_src, _ = librosa.load(src, sr=hps.data.sampling_rate)
-            wav_src = torch.from_numpy(wav_src).unsqueeze(0).cuda()
-            c = utils.get_content(cmodel, wav_src)
+        print("Synthesizing...")
+        with torch.no_grad():
+            for line in tqdm(zip(titles, srcs, tgts)):
+                title, src, tgt = line
+                # tgt
+                wav_tgt, _ = librosa.load(tgt, sr=hps.data.sampling_rate)
+                wav_tgt, _ = librosa.effects.trim(wav_tgt, top_db=20)
+                if hps.model.use_spk:
+                    g_tgt = smodel.embed_utterance(wav_tgt)
+                    g_tgt = torch.from_numpy(g_tgt).unsqueeze(0).cuda()
+                else:
+                    wav_tgt = torch.from_numpy(wav_tgt).unsqueeze(0).cuda()
+                    mel_tgt = mel_spectrogram_torch(
+                        wav_tgt, 
+                        hps.data.filter_length,
+                        hps.data.n_mel_channels,
+                        hps.data.sampling_rate,
+                        hps.data.hop_length,
+                        hps.data.win_length,
+                        hps.data.mel_fmin,
+                        hps.data.mel_fmax
+                    )
+                # src
+                wav_src, _ = librosa.load(src, sr=hps.data.sampling_rate)
+                wav_src = torch.from_numpy(wav_src).unsqueeze(0).cuda()
+                c = utils.get_content(cmodel, wav_src)
             
-            if hps.model.use_spk:
-                audio = net_g.infer(c, g=g_tgt)
-            else:
-                audio = net_g.infer(c, mel=mel_tgt)
-            audio = audio[0][0].data.cpu().float().numpy()
-            if args.use_timestamp:
-                timestamp = time.strftime("%m-%d_%H-%M", time.localtime())
-                write(os.path.join(args.outdir, "{}.wav".format(timestamp+"_"+title)), hps.data.sampling_rate, audio)
-            else:
-                write(os.path.join(args.outdir, f"{title}.wav"), hps.data.sampling_rate, audio)
+                if hps.model.use_spk:
+                    audio = net_g.infer(c, g=g_tgt)
+                else:
+                    audio = net_g.infer(c, mel=mel_tgt)
+                audio = audio[0][0].data.cpu().float().numpy()
+                if args.use_timestamp:
+                    timestamp = time.strftime("%m-%d_%H-%M", time.localtime())
+                    write(os.path.join(args.outdir, "{}.wav".format(timestamp+"_"+title)), hps.data.sampling_rate, audio)
+                else:
+                    write(os.path.join(args.outdir, f"{title}.wav"), hps.data.sampling_rate, audio)
             
