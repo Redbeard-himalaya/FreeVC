@@ -2,10 +2,11 @@ ARG GCS_ACCESS_KEY
 ARG GCS_SECRET_KEY
 ARG GCS_BUCKET
 ARG MODEL_GCS_PATH="ai_models/FreeVC"
+ARG FREEVC_DIR="/freevc"
 # full MODEL_LST: freevc-24.pth D-freevc-24.pth freevc.pth freevc-s.pth
 ARG MODEL_LST="freevc.pth"
-ARG MODEL_DIR="/app/checkpoints"
-ARG WAVLM_DIR="/app/wavlm"
+ARG MODEL_DIR=${FREEVC_DIR}/checkpoints
+ARG WAVLM_DIR=${FREEVC_DIR}/wavlm
 ARG WAVLM_URL="https://drive.google.com/uc?id=12-cB34qCTvByWT-QtOcZaqwwO21FLSqU"
 
 
@@ -32,12 +33,13 @@ RUN apt-get update && apt-get install -y wget && \
 
 From nvidia/cuda:11.2.0-base-ubuntu20.04 as runtime
 
+ARG FREEVC_DIR
 ARG MODEL_DIR
 ARG WAVLM_DIR
 ENV PATH=/root/miniconda3/bin:$PATH
 ENV CUDA_VISIBLE_DEVICES=0
 
-WORKDIR /app
+WORKDIR ${FREEVC_DIR}
 
 COPY . .
 
