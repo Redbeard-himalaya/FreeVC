@@ -2,7 +2,8 @@ ARG GCS_ACCESS_KEY
 ARG GCS_SECRET_KEY
 ARG GCS_BUCKET
 ARG MODEL_GCS_PATH="ai_models/FreeVC"
-ARG MODEL_LST="freevc-24.pth D-freevc-24.pth freevc.pth freevc-s.pth"
+# full MODEL_LST: freevc-24.pth D-freevc-24.pth freevc.pth freevc-s.pth
+ARG MODEL_LST="freevc.pth"
 ARG MODEL_DIR="/app/checkpoints"
 ARG WAVLM_DIR="/app/wavlm"
 ARG WAVLM_URL="https://drive.google.com/uc?id=12-cB34qCTvByWT-QtOcZaqwwO21FLSqU"
